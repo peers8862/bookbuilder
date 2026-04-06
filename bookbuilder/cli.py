@@ -94,9 +94,25 @@ def cmd_mcp(args: argparse.Namespace, root: Path) -> int:
 
 
 def cmd_run(args: argparse.Namespace, root: Path) -> int:
-    """Run all enabled stages in order."""
-    stages = [cmd_ingest, cmd_fetch, cmd_analyze, cmd_cluster, cmd_build]
-    for stage in stages:
+    """Run all enabled stages in order, skipping downstream stages if nothing changed."""
+    from .ingest import run_ingest
+
+    input_dir = root / "input"
+    state_dir  = root / "state"
+    paths = sorted(input_dir.glob("*.json")) if not getattr(args, "input", None) else [Path(p) for p in args.input]
+    if not paths:
+        print(f"No JSON files found in {input_dir}")
+        return 1
+
+    print(f"Ingesting {len(paths)} file(s)...")
+    new, updated, skipped = run_ingest(paths, state_dir, root)
+    print(f"  new={new}  updated={updated}  skipped={skipped}")
+
+    if new == 0 and updated == 0 and not getattr(args, "force", False):
+        print("Nothing changed — skipping fetch, analyze, cluster, build.")
+        return 0
+
+    for stage in [cmd_fetch, cmd_analyze, cmd_cluster, cmd_build]:
         rc = stage(args, root)
         if rc != 0:
             return rc

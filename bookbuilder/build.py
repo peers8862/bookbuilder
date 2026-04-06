@@ -13,6 +13,7 @@ Outputs:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -21,6 +22,52 @@ from pathlib import Path
 
 from .config import load_config, load_taxonomy
 from .store import iter_items
+
+
+# ── Build manifest ────────────────────────────────────────────────────────────
+
+def _fingerprint(items: list) -> str:
+    """Stable 16-char hash of a set of items based on id + last-modified timestamp."""
+    parts = sorted(
+        f"{item.id}:{item.analysis.analyzed_at if item.analysis else (item.state.ingested_at if item.state else '')}"
+        for item in items
+    )
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+class _Manifest:
+    """
+    Tracks per-output-file fingerprints so unchanged files can be skipped.
+    Persisted to state/build_manifest.json.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._data: dict[str, str] = {}
+        if path.exists():
+            try:
+                self._data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        self.written = 0
+        self.skipped = 0
+
+    def needs_update(self, out_path: Path, items: list) -> bool:
+        """Return True (and record new fingerprint) if items have changed since last build."""
+        key = str(out_path)
+        fp = _fingerprint(items)
+        if self._data.get(key) == fp:
+            self.skipped += 1
+            return False
+        self._data[key] = fp
+        self.written += 1
+        return True
+
+    def save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(
+            json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -293,6 +340,8 @@ def run_build(root: Path, force: bool = False) -> None:
     knowledge_dir = root / "knowledge"
     site_dir = root / out_cfg.get("site_dir", "site")
 
+    manifest = _Manifest(root / "state" / "build_manifest.json")
+
     all_items = list(iter_items(root))
     print(f"  building from {len(all_items)} items")
 
@@ -344,7 +393,8 @@ def run_build(root: Path, force: bool = False) -> None:
                 sub_info = cat_info.get("subcategories", {}).get(sub_key, {})
                 sub_label = sub_info.get("label", sub_key)
                 out_path = knowledge_dir / "topics" / cat_key / f"{sub_key}.md"
-                _write_topic_digest(out_path, cat_label, sub_label, items, highlights_count, highlights_min)
+                if force or manifest.needs_update(out_path, items):
+                    _write_topic_digest(out_path, cat_label, sub_label, items, highlights_count, highlights_min)
         print(f"  wrote topic digests → knowledge/topics/")
 
     # ── Author digests ───────────────────────────────────────────────────────
@@ -353,27 +403,43 @@ def run_build(root: Path, force: bool = False) -> None:
         for handle, items in author_items.items():
             if len(items) < author_min_items:
                 continue
-            _write_author_digest(knowledge_dir / "authors" / f"{handle}.md", handle, items)
-            written += 1
+            out_path = knowledge_dir / "authors" / f"{handle}.md"
+            if force or manifest.needs_update(out_path, items):
+                _write_author_digest(out_path, handle, items)
+                written += 1
         print(f"  wrote {written} author digests → knowledge/authors/")
 
     # ── Tech registry ────────────────────────────────────────────────────────
     if build_outputs.get("tech_registry", True):
+        written_tech = 0
         for tech_name, subcat_items in tech_items.items():
             slug = _slugify(tech_name)
-            _write_tech_page(knowledge_dir / "tech" / f"{slug}.md", tech_name, subcat_items)
-        print(f"  wrote {len(tech_items)} tech pages → knowledge/tech/")
+            out_path = knowledge_dir / "tech" / f"{slug}.md"
+            all_tech_items = [i for lst in subcat_items.values() for i in lst]
+            if force or manifest.needs_update(out_path, all_tech_items):
+                _write_tech_page(out_path, tech_name, subcat_items)
+                written_tech += 1
+        print(f"  wrote {written_tech} tech pages → knowledge/tech/")
 
     # ── Search index ─────────────────────────────────────────────────────────
     if build_outputs.get("search_index", True):
-        index = _build_search_index(all_items)
         idx_path = knowledge_dir / "index.json"
-        idx_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-        print(f"  wrote search index ({len(index)} records) → knowledge/index.json")
+        if force or manifest.needs_update(idx_path, all_items):
+            index = _build_search_index(all_items)
+            idx_path.parent.mkdir(parents=True, exist_ok=True)
+            idx_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+            print(f"  wrote search index ({len(index)} records) → knowledge/index.json")
+        else:
+            print(f"  search index unchanged, skipped")
 
     # ── Static site ──────────────────────────────────────────────────────────
     if build_outputs.get("site", True):
-        _write_site(site_dir, len(all_items))
-        print(f"  wrote site → site/index.html")
+        site_sentinel = site_dir / "index.html"
+        if force or manifest.needs_update(site_sentinel, all_items):
+            _write_site(site_dir, len(all_items))
+            print(f"  wrote site → site/index.html")
+        else:
+            print(f"  site unchanged, skipped")
 
-    print("  build complete.")
+    manifest.save()
+    print(f"  build complete. wrote={manifest.written} skipped={manifest.skipped}")
