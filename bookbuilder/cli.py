@@ -87,6 +87,12 @@ def cmd_build(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace, root: Path) -> int:
+    from .mcp_server import run_server
+    run_server(root)
+    return 0
+
+
 def cmd_run(args: argparse.Namespace, root: Path) -> int:
     """Run all enabled stages in order."""
     stages = [cmd_ingest, cmd_fetch, cmd_analyze, cmd_cluster, cmd_build]
@@ -134,6 +140,9 @@ def main() -> None:
     p_build = sub.add_parser("build", help="Generate knowledge/ and site/")
     p_build.add_argument("--force", action="store_true")
 
+    # mcp
+    sub.add_parser("mcp", help="Start the MCP server (stdio) for Claude integration")
+
     # run (all)
     sub.add_parser("run", help="Run all enabled stages in sequence")
 
@@ -146,6 +155,7 @@ def main() -> None:
         "analyze": cmd_analyze,
         "cluster": cmd_cluster,
         "build":   cmd_build,
+        "mcp":     cmd_mcp,
         "run":     cmd_run,
     }
 
