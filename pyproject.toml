@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bookbuilder"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    # HTTP / fetching
+    "httpx[http2]>=0.27",
+    "beautifulsoup4>=4.12",
+    "readability-lxml>=0.8",
+    # AI
+    "anthropic>=0.25",
+    "openai>=1.30",           # embeddings
+    # Clustering
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "hdbscan>=0.8",
+    # Config
+    "pyyaml>=6.0",
+    # CLI
+    "rich>=13",               # pretty terminal output
+]
+
+[project.scripts]
+bookbuilder = "bookbuilder.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bookbuilder*"]
