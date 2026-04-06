@@ -93,6 +93,75 @@ def cmd_mcp(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_search(args: argparse.Namespace, root: Path) -> int:
+    from .search import search_items
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich import box
+        _rich = True
+    except ImportError:
+        _rich = False
+
+    query    = " ".join(args.query) if args.query else ""
+    limit    = args.limit
+    min_qs   = args.min_score
+    category = getattr(args, "category", None)
+    author   = getattr(args, "author", None)
+    tech     = getattr(args, "tech", None)
+
+    results = search_items(
+        root, query,
+        limit=limit,
+        min_quality=min_qs,
+        category=category,
+        author=author,
+        tech=tech,
+    )
+
+    if not results:
+        print("No results found.")
+        return 0
+
+    if _rich:
+        console = Console()
+        table = Table(box=box.SIMPLE, show_header=True, header_style="bold cyan",
+                      expand=True, padding=(0, 1))
+        table.add_column("#",        style="dim",          width=3,  no_wrap=True)
+        table.add_column("Score",    style="yellow",       width=5,  no_wrap=True)
+        table.add_column("Quality",  style="green",        width=5,  no_wrap=True)
+        table.add_column("Author",   style="cyan",         width=16, no_wrap=True)
+        table.add_column("Summary",  ratio=3)
+        table.add_column("Tags",     ratio=1, style="dim")
+        table.add_column("URL",      style="blue dim",     width=20, no_wrap=True)
+
+        for i, (score, item) in enumerate(results, 1):
+            a = item.analysis
+            summary = (a.summary[:120] if a and a.summary else item.text[:80].replace("\n", " "))
+            tags    = "  ".join(a.tags[:4]) if a and a.tags else ""
+            qs      = f"{a.quality_score:.2f}" if a else "—"
+            handle  = f"@{item.author_handle}" if item.author_handle else item.author_name[:14]
+            url     = item.url[-40:] if len(item.url) > 40 else item.url
+            table.add_row(str(i), f"{score:.1f}", qs, handle, summary, tags, url)
+
+        console.print(f"\n[bold]{len(results)} result(s)[/bold] for [italic]{query or '(all)'}[/italic]\n")
+        console.print(table)
+    else:
+        # Plain fallback
+        print(f"\n{len(results)} result(s) for '{query or '(all)'}':\n")
+        for i, (score, item) in enumerate(results, 1):
+            a = item.analysis
+            summary = a.summary[:100] if a and a.summary else item.text[:80].replace("\n", " ")
+            handle  = item.author_handle or item.author_name
+            qs      = f"{a.quality_score:.2f}" if a else "—"
+            print(f"  {i:2}. [{score:.1f}|{qs}] @{handle}: {summary}")
+            print(f"      {item.url}")
+            print()
+
+    return 0
+
+
 def cmd_run(args: argparse.Namespace, root: Path) -> int:
     """Run all enabled stages in order, skipping downstream stages if nothing changed."""
     from .ingest import run_ingest
@@ -156,6 +225,21 @@ def main() -> None:
     p_build = sub.add_parser("build", help="Generate knowledge/ and site/")
     p_build.add_argument("--force", action="store_true")
 
+    # search
+    p_search = sub.add_parser("search", help="Search the knowledge base from the terminal")
+    p_search.add_argument("query",      nargs="*",       metavar="TERM",
+                          help="Search terms (omit to list all items by quality)")
+    p_search.add_argument("--limit",    type=int, default=20,
+                          help="Maximum results (default 20)")
+    p_search.add_argument("--min-score", dest="min_score", type=float, default=0.0,
+                          help="Minimum quality score filter (0.0–1.0)")
+    p_search.add_argument("--category", metavar="CAT",
+                          help="Filter by taxonomy category prefix (e.g. ai_ml)")
+    p_search.add_argument("--author",   metavar="HANDLE",
+                          help="Filter by Twitter/X handle (without @)")
+    p_search.add_argument("--tech",     metavar="TECH",
+                          help="Filter by technology reference (e.g. pytorch)")
+
     # mcp
     sub.add_parser("mcp", help="Start the MCP server (stdio) for Claude integration")
 
@@ -171,6 +255,7 @@ def main() -> None:
         "analyze": cmd_analyze,
         "cluster": cmd_cluster,
         "build":   cmd_build,
+        "search":  cmd_search,
         "mcp":     cmd_mcp,
         "run":     cmd_run,
     }

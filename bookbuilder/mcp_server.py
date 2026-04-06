@@ -21,6 +21,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .models import Item
+from .search import matches_author, matches_category, matches_tech, score_item, search_items
 from .store import iter_items, read_item
 
 
@@ -104,36 +105,6 @@ def _item_full(item: Item) -> dict:
     }
 
 
-# ── Search scoring ────────────────────────────────────────────────────────────
-
-def _score_item(item: Item, query_words: set[str]) -> float:
-    """Score an item against query words; higher = more relevant."""
-    a = item.analysis
-    score = 0.0
-
-    text_lower    = item.text.lower()
-    summary_lower = a.summary.lower() if a else ""
-    card_lower    = item.card_title.lower() if item.card_title else ""
-
-    for word in query_words:
-        if word in text_lower:
-            score += 1.0
-        if word in summary_lower:
-            score += 2.0
-        if a and any(word in tag.lower() for tag in a.tags):
-            score += 2.0
-        if word in card_lower:
-            score += 1.5
-        if a and any(word in cat.lower() for cat in a.categories):
-            score += 1.0
-        if a:
-            for concept in a.entities.concepts:
-                if word in concept.lower():
-                    score += 0.5
-
-    return score
-
-
 # ── MCP Tools ────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -149,18 +120,8 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict]:
     """
     root = _get_root()
     limit = min(max(1, limit), 50)
-    query_words = set(query.lower().split())
-    if not query_words:
-        return []
-
-    scored = []
-    for item in iter_items(root):
-        s = _score_item(item, query_words)
-        if s > 0:
-            scored.append((s, item))
-
-    scored.sort(key=lambda x: (-x[0], -(x[1].analysis.quality_score if x[1].analysis else 0.0)))
-    return [_item_summary(item) for _, item in scored[:limit]]
+    results = search_items(root, query, limit=limit)
+    return [_item_summary(item) for _, item in results]
 
 
 @mcp.tool()
@@ -225,18 +186,8 @@ def find_by_tech(tech: str, limit: int = 10) -> list[dict]:
     """
     root = _get_root()
     limit = min(max(1, limit), 50)
-    tech_lower = tech.lower()
-
-    results = []
-    for item in iter_items(root):
-        if not item.analysis:
-            continue
-        refs = [r.lower() for r in item.analysis.tech_refs.all_refs()]
-        if any(tech_lower in ref or ref in tech_lower for ref in refs):
-            results.append(item)
-
-    results.sort(key=lambda i: -(i.analysis.quality_score if i.analysis else 0.0))
-    return [_item_summary(item) for item in results[:limit]]
+    results = search_items(root, "", limit=limit, tech=tech)
+    return [_item_summary(item) for _, item in results]
 
 
 @mcp.tool()
@@ -252,14 +203,8 @@ def find_by_author(handle: str, limit: int = 20) -> list[dict]:
     """
     root = _get_root()
     limit = min(max(1, limit), 100)
-    handle_lower = handle.lower().lstrip("@")
-
-    results = [
-        item for item in iter_items(root)
-        if item.author_handle.lower() == handle_lower
-    ]
-    results.sort(key=lambda i: -(i.analysis.quality_score if i.analysis else 0.0))
-    return [_item_summary(item) for item in results[:limit]]
+    results = search_items(root, "", limit=limit, author=handle)
+    return [_item_summary(item) for _, item in results]
 
 
 @mcp.tool()
@@ -277,15 +222,8 @@ def find_by_category(category: str, limit: int = 20) -> list[dict]:
     """
     root = _get_root()
     limit = min(max(1, limit), 100)
-    cat_lower = category.lower()
-
-    results = [
-        item for item in iter_items(root)
-        if item.analysis
-        and any(c.lower().startswith(cat_lower) for c in item.analysis.categories)
-    ]
-    results.sort(key=lambda i: -(i.analysis.quality_score if i.analysis else 0.0))
-    return [_item_summary(item) for item in results[:limit]]
+    results = search_items(root, "", limit=limit, category=category)
+    return [_item_summary(item) for _, item in results]
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
