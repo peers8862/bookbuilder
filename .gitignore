@@ -1,0 +1,25 @@
+# Generated outputs — safe to delete and rebuild
+state/
+cache/
+knowledge/
+site/
+debug_output/
+
+# Input data — keep locally, don't commit (potentially private)
+input/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Env
+.env
