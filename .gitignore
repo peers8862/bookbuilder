@@ -3,7 +3,10 @@ state/
 cache/
 knowledge/
 site/
+vault/
 debug_output/
+export_*.md
+export_*.html
 
 # Input data — keep locally, don't commit (potentially private)
 input/

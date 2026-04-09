@@ -46,14 +46,19 @@ def _render_prompt(template: str, item, category_paths: list[str]) -> str:
     )
     fetched_text = _item_text_excerpt(item)
     taxonomy_str = "\n".join(f"  - {p}" for p in category_paths)
+    # For document sources, card_title holds the document title
+    doc_sources = {"markdown", "text", "docx"}
+    title = item.card_title if item.source in doc_sources else (fetched_title or "(none)")
+    source_hint = f"local {item.source} file" if item.source in doc_sources else "tweet"
 
     return (
         template
         .replace("{text}", item.text or "(no text)")
-        .replace("{fetched_title}", fetched_title or "(none)")
+        .replace("{fetched_title}", title or "(none)")
         .replace("{fetched_text}", fetched_text or "(not fetched)")
         .replace("{card_title}", item.card_title or "(none)")
         .replace("{card_desc}", item.card_desc or "(none)")
+        .replace("{source_hint}", source_hint)
         .replace("{taxonomy_categories}", taxonomy_str)
     )
 
@@ -148,9 +153,12 @@ def _analyze_one(
 
 # ── Main analyze runner ──────────────────────────────────────────────────────
 
-def run_analyze(root: Path, force: bool = False, batch_size: int | None = None) -> tuple[int, int]:
+def run_analyze(root: Path, force: bool = False, batch_size: int | None = None,
+                since: str | None = None, cluster_id: str | None = None) -> tuple[int, int]:
     """
     Analyze all items with analyze_status != "ok" (or all if force=True).
+    --since DATE  : only items ingested on or after DATE (ISO format, e.g. 2024-01-01)
+    --cluster ID  : only items belonging to this cluster_id
     Returns (analyzed_count, error_count).
     """
     import os
@@ -176,6 +184,19 @@ def run_analyze(root: Path, force: bool = False, batch_size: int | None = None) 
         iid for iid, s in states.items()
         if force or s.analyze_status != "ok"
     ]
+
+    # --since filter
+    if since:
+        pending = [iid for iid in pending if states[iid].ingested_at[:10] >= since[:10]]
+
+    # --cluster filter: load items to check cluster_id
+    if cluster_id:
+        from .store import read_item
+        pending = [
+            iid for iid in pending
+            if (item := read_item(root, iid)) and item.analysis
+            and item.analysis.cluster_id == cluster_id
+        ]
     print(f"  {len(pending)} items to analyze (model={model}, batch={batch})")
 
     analyzed = error = 0

@@ -181,7 +181,8 @@ def _find_image_urls(item) -> list[str]:
 
 # ── Main fetch runner ────────────────────────────────────────────────────────
 
-async def _run_fetch_async(root: Path, force: bool, workers: int) -> tuple[int, int, int]:
+async def _run_fetch_async(root: Path, force: bool, workers: int,
+                          stale_after_days: int | None = None) -> tuple[int, int, int]:
     cfg          = load_config(root)
     skip_domains = load_skip_domains(root)
     fetch_cfg    = cfg.get("fetch", {})
@@ -194,6 +195,13 @@ async def _run_fetch_async(root: Path, force: bool, workers: int) -> tuple[int, 
     state_path = root / "state" / "items.jsonl"
     states     = load_state(state_path)
 
+    # Determine stale cutoff
+    stale_cutoff: str | None = None
+    if stale_after_days is not None:
+        from datetime import timedelta
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=stale_after_days)
+        stale_cutoff = cutoff_dt.isoformat()
+
     sem = asyncio.Semaphore(workers)
     ok_count = skip_count = err_count = 0
 
@@ -202,9 +210,18 @@ async def _run_fetch_async(root: Path, force: bool, workers: int) -> tuple[int, 
         async def process_item(item_id: str, state: ItemState):
             nonlocal ok_count, skip_count, err_count
 
-            if not force and state.fetch_status == "ok":
+            already_fetched = state.fetch_status == "ok"
+            is_stale = (
+                stale_cutoff is not None
+                and already_fetched
+                and state.fetched_at
+                and state.fetched_at < stale_cutoff
+            )
+            if not force and already_fetched and not is_stale:
                 skip_count += 1
                 return
+            if is_stale:
+                state.fetch_status = "pending"  # reset so it re-fetches
 
             item = read_item(root, item_id)
             if item is None:
@@ -259,7 +276,8 @@ async def _run_fetch_async(root: Path, force: bool, workers: int) -> tuple[int, 
     return ok_count, err_count, skip_count
 
 
-def run_fetch(root: Path, force: bool = False, workers: int | None = None) -> tuple[int, int, int]:
+def run_fetch(root: Path, force: bool = False, workers: int | None = None,
+              stale_after_days: int | None = None) -> tuple[int, int, int]:
     cfg = load_config(root)
     w = workers or cfg.get("fetch", {}).get("workers", 8)
-    return asyncio.run(_run_fetch_async(root, force, w))
+    return asyncio.run(_run_fetch_async(root, force, w, stale_after_days=stale_after_days))

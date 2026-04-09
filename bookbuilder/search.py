@@ -66,6 +66,71 @@ def matches_tech(item: Item, tech: str) -> bool:
     )
 
 
+# ── Semantic search ──────────────────────────────────────────────────────────
+
+def semantic_search(
+    root: Path,
+    query: str,
+    *,
+    limit: int = 10,
+    min_quality: float = 0.0,
+    category: str | None = None,
+    author: str | None = None,
+    tech: str | None = None,
+) -> list[tuple[float, Item]]:
+    """
+    Cosine-similarity search using the embedding cache from the cluster stage.
+    Falls back to keyword search if embeddings are unavailable.
+    """
+    import json
+    import numpy as np
+
+    cache_path = root / "cache" / "embeddings" / "items.json"
+    if not cache_path.exists():
+        print("  [search] no embedding cache found — falling back to keyword search")
+        return search_items(root, query, limit=limit, min_quality=min_quality,
+                            category=category, author=author, tech=tech)
+
+    from .config import load_config
+    import os
+    cfg = load_config(root)
+    ai_cfg = cfg.get("ai", {})
+    emb_model = ai_cfg.get("embedding_model", "text-embedding-3-small")
+    api_key = os.environ.get(cfg.get("api_keys", {}).get("openai_env", "OPENAI_API_KEY"), "")
+    if not api_key:
+        print("  [search] OPENAI_API_KEY not set — falling back to keyword search")
+        return search_items(root, query, limit=limit, min_quality=min_quality,
+                            category=category, author=author, tech=tech)
+
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    resp = client.embeddings.create(model=emb_model, input=[query])
+    query_vec = np.array(resp.data[0].embedding, dtype=np.float32)
+
+    cache: dict[str, list[float]] = json.loads(cache_path.read_text(encoding="utf-8"))
+
+    results: list[tuple[float, Item]] = []
+    for item in iter_items(root):
+        qs = item.analysis.quality_score if item.analysis else 0.0
+        if qs < min_quality:
+            continue
+        if category and not matches_category(item, category):
+            continue
+        if author and not matches_author(item, author):
+            continue
+        if tech and not matches_tech(item, tech):
+            continue
+        if item.id not in cache:
+            continue
+        item_vec = np.array(cache[item.id], dtype=np.float32)
+        score = float(np.dot(query_vec, item_vec) /
+                      (np.linalg.norm(query_vec) * np.linalg.norm(item_vec) + 1e-9))
+        results.append((score, item))
+
+    results.sort(key=lambda x: (-x[0], -(x[1].analysis.quality_score if x[1].analysis else 0.0)))
+    return results[:limit]
+
+
 # ── Main search entry point ───────────────────────────────────────────────────
 
 def search_items(

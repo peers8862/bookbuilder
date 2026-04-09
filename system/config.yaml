@@ -44,6 +44,31 @@ output:
   # Author digest files (one .md per author who appears 3+ times)
   author_min_items: 3                 # don't create a file for one-off authors
 
+# Agents
+agents:
+  item_critic:
+    enabled: true
+    score_threshold: 0.55      # re-analyze items below this quality score
+  cluster_analyst:
+    enabled: true
+    top_n_items: 15            # item summaries sent per cluster
+    min_items: 3               # skip clusters smaller than this
+  digest_writer:
+    enabled: true
+    top_n_items: 12
+    min_items: 4
+  highlight_curator:
+    enabled: true
+    pool_size: 20       # items sent to Claude per topic
+    pick_count: 5       # items Claude selects
+    min_items: 6        # skip topics smaller than this
+  connection_finder:
+    enabled: true
+  gap_detector:
+    enabled: true
+  taxonomy_evolver:
+    enabled: true
+
 # Paths (relative to project root)
 paths:
   input_dir: input/

@@ -1,22 +1,23 @@
 # bookbuilder — analysis prompt
 # Used by: bookbuilder/analyze.py
-# This template is filled at runtime. Variables: {text}, {fetched_title},
-# {fetched_text}, {card_title}, {card_desc}, {taxonomy_categories}
+# Variables: {text}, {fetched_title}, {fetched_text}, {card_title}, {card_desc},
+#            {source_hint}, {taxonomy_categories}
 # ─────────────────────────────────────────────────────────────────────────────
 
-You are a knowledge curation assistant. Analyse the tweet content below and return
+You are a knowledge curation assistant. Analyse the content below (a {source_hint}) and return
 a single JSON object. Be precise and concise. Do not add commentary outside the JSON.
 
 ## Input
 
-**Tweet text:**
+**Title / heading:** {fetched_title}
+
+**Content:**
 {text}
 
-**Linked article title:** {fetched_title}
+**Linked article title:** {card_title}
 **Linked article excerpt:**
 {fetched_text}
 
-**Card title:** {card_title}
 **Card description:** {card_desc}
 
 ## Task
@@ -62,5 +63,7 @@ Return a JSON object with exactly these fields:
   //   0.5–0.6  casual comment, vague pointer, low context
   //   0.2–0.4  noise, personal update, meme, low information
   //   0.0–0.1  no meaningful content
+  // For local documents (markdown, text, docx): score based on depth and usefulness
+  // of the content itself, not its brevity.
 }
 ```
